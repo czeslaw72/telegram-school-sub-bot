@@ -7,6 +7,8 @@ from docx import Document
 
 # Отримуємо токен з змінних середовища
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
+# Отримуємо URL сервісу з Render (наприклад, https://your-service-name.onrender.com)
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "https://your-service-name.onrender.com")
 
 # Ініціалізація таблиці замін
 initial_data = {
@@ -176,7 +178,13 @@ def main() -> None:
     application.add_handler(MessageHandler(BaseFilter(), handle_text))
     application.add_handler(MessageHandler(TelegramDocument(), handle_docx))
 
-    application.run_polling()
+    # Налаштування Webhook
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=8000,  # Порт, який використовується на Render
+        url_path=TOKEN,
+        webhook_url=f"{WEBHOOK_URL}/{TOKEN}"
+    )
 
 if __name__ == '__main__':
     main()

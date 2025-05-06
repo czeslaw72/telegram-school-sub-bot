@@ -48,6 +48,9 @@ async def button(update: Update, context: CallbackContext) -> None:
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.message.reply_text("Оберіть клас:", reply_markup=reply_markup)
     elif query.data == 'update_subs':
+        # Очищаємо попередні стани
+        context.user_data.clear()
+        context.user_data['awaiting_password'] = True
         await query.message.reply_text("Введіть пароль адміністратора:")
 
 # Обробка вибору класу
@@ -73,6 +76,9 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
     global substitutions_df
     message_text = update.message.text
 
+    # Логування стану для діагностики
+    print(f"User data: {context.user_data}")
+
     # Перевірка пароля для адміністратора
     if context.user_data.get('awaiting_password'):
         if check_admin(message_text):
@@ -85,6 +91,7 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
 
     # Оновлення таблиці адміністратором
     if context.user_data.get('is_admin'):
+        print("Admin mode active, processing table update")
         try:
             lines = message_text.split('\n')
             data = [line.split(',') for line in lines]
@@ -119,11 +126,6 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
     else:
         await update.message.reply_text("Я розумію запити типу 'Які заміни в 6-А?'. Спробуйте ще раз!")
 
-# Обробка введення пароля
-async def handle_password(update: Update, context: CallbackContext) -> None:
-    context.user_data['awaiting_password'] = True
-    await handle_message(update, context)
-
 # Запуск бота
 def main() -> None:
     application = Application.builder().token(TOKEN).build()
@@ -133,10 +135,6 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(handle_class_selection, pattern='^class_'))
     application.add_handler(MessageHandler(BaseFilter(), handle_message))
 
-    application.run_polling()
-
-if __name__ == '__main__':
-    main()
     application.run_polling()
 
 if __name__ == '__main__':

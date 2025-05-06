@@ -1,10 +1,11 @@
 import os
 import pandas as pd
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, Filters, CallbackContext, CallbackQueryHandler
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackContext, CallbackQueryHandler
+from telegram.ext.filters import BaseFilter
 
 # Отримуємо токен з змінних середовища
-TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "7768575905:AAGyQj1peAzjZoB1ZuZ8XV0EbmBTELPRAn8")
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
 
 # Ініціалізація таблиці замін
 initial_data = {
@@ -130,8 +131,12 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(button, pattern='^(view_subs|update_subs)$'))
     application.add_handler(CallbackQueryHandler(handle_class_selection, pattern='^class_'))
-    application.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+    application.add_handler(MessageHandler(BaseFilter(), handle_message))
 
+    application.run_polling()
+
+if __name__ == '__main__':
+    main()
     application.run_polling()
 
 if __name__ == '__main__':

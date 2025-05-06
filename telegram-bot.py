@@ -2,7 +2,7 @@ import os
 import pandas as pd
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackContext, CallbackQueryHandler
-from telegram.ext.filters import BaseFilter, Document
+from telegram.ext.filters import BaseFilter, Document as TelegramDocument
 from docx import Document
 
 # Отримуємо токен з змінних середовища
@@ -12,14 +12,14 @@ TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
 initial_data = {
     "Дата": ["02.05.2025", "02.05.2025", "02.05.2025", "02.05.2025"],
     "Клас": ["6-А", "6-Б", "7-А", "7-Б"],
-    "Урок 1": ["За.рл", "", "", ""],
-    "Урок 2": ["", "Матем", "Теометр", "Фіз.л"],
-    "Урок 3": ["", "", "Укр.м", "Укр.м"],
-    "Урок 4": ["", "Муз.м", "", "Теометр"],
-    "Урок 5": ["", "", "", "Нім.м"],
+    "Урок 0": ["За.рл", "", "", ""],
+    "Урок 1": ["", "Матем", "Теометр", "Фіз.л"],
+    "Урок 2": ["", "", "Укр.м", "Укр.м"],
+    "Урок 3": ["", "Муз.м", "", "Теометр"],
+    "Урок 4": ["", "", "", "Нім.м"],
+    "Урок 5": ["", "", "", ""],
     "Урок 6": ["", "", "", ""],
-    "Урок 7": ["", "", "", ""],
-    "Урок 8": ["", "", "", ""]
+    "Урок 7": ["", "", "", ""]
 }
 substitutions_df = pd.DataFrame(initial_data)
 
@@ -94,7 +94,7 @@ async def handle_text(update: Update, context: CallbackContext) -> None:
         if check_admin(message_text):
             context.user_data['is_admin'] = True
             context.user_data.pop('awaiting_password')
-            await update.message.reply_text("Пароль правильний! Надішліть таблицю замін у форматі:\nДата,Клас,Урок 1,Урок 2,Урок 3,Урок 4,Урок 5,Урок 6,Урок 7,Урок 8\nАбо надішліть .docx файл із таблицею.")
+            await update.message.reply_text("Пароль правильний! Надішліть .docx файл із таблицею.")
         else:
             await update.message.reply_text("Неправильний пароль! Спробуйте ще раз:")
         return
@@ -108,7 +108,7 @@ async def handle_text(update: Update, context: CallbackContext) -> None:
             new_df = pd.DataFrame(data[1:], columns=data[0])
             required_columns = ["Дата", "Клас"] + [f"Урок {i}" for i in range(1, 9)]
             if not all(col in new_df.columns for col in required_columns):
-                await update.message.reply_text("Таблиця повинна містити колонки: Дата, Клас, Урок 1–Урок 8!")
+                await update.message.reply_text("Формат таблиці не відповідає встановленому")
                 return
             substitutions_df = new_df
             context.user_data.pop('is_admin')
@@ -150,9 +150,9 @@ async def handle_docx(update: Update, context: CallbackContext) -> None:
         file_path = await file.download_to_drive()
         try:
             new_df = extract_table_from_docx(file_path)
-            required_columns = ["Дата", "Клас"] + [f"Урок {i}" for i in range(1, 9)]
+            required_columns = ["Дата", "Клас"] + [f"Урок {i}" for i in range(0, 8)]
             if not all(col in new_df.columns for col in required_columns):
-                await update.message.reply_text("Таблиця повинна містити колонки: Дата, Клас, Урок 1–Урок 8!")
+                await update.message.reply_text("Формат таблиці не відповідає встановленому")
                 return
             substitutions_df = new_df
             context.user_data.pop('is_admin')
@@ -171,7 +171,7 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(button, pattern='^(view_subs|update_subs)$'))
     application.add_handler(CallbackQueryHandler(handle_class_selection, pattern='^class_'))
     application.add_handler(MessageHandler(BaseFilter(), handle_text))
-    application.add_handler(MessageHandler(Document.ALL, handle_docx))
+    application.add_handler(MessageHandler(TelegramDocument(), handle_docx))
 
     application.run_polling()
 

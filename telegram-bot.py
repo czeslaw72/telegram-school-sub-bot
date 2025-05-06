@@ -5,9 +5,8 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackCo
 from telegram.ext.filters import BaseFilter, Document as TelegramDocument
 from docx import Document
 
-# Отримуємо токен з змінних середовища
+# Отримуємо токен і URL з змінних середовища
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
-# Отримуємо URL сервісу з Render (наприклад, https://your-service-name.onrender.com)
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "https://your-service-name.onrender.com")
 
 # Ініціалізація таблиці замін

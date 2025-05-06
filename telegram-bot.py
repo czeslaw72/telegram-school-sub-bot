@@ -102,6 +102,9 @@ async def handle_text(update: Update, context: CallbackContext) -> None:
     # Оновлення таблиці текстом (для сумісності)
     if context.user_data.get('is_admin'):
         print("Admin mode active, processing table update")
+        if message_text is None or not message_text.strip():
+            await update.message.reply_text("Надішліть таблицю у форматі:\nДата,Клас,Урок 0,Урок 1,Урок 2,Урок 3,Урок 4,Урок 5,Урок 6,Урок 7\nПриклад:\n02.05.2025,6-А,Матем,,,,,,,")
+            return
         try:
             lines = message_text.split('\n')
             data = [line.split(',') for line in lines]

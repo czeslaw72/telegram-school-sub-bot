@@ -4,7 +4,7 @@ services:
     env: python
     repo: https://github.com/czeslaw72/telegram-school-sub-bot
     branch: main
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install "python-telegram-bot[webhooks]==20.8" pandas python-docx
     startCommand: python telegram-bot.py
     envVars:
       - key: PYTHON_VERSION

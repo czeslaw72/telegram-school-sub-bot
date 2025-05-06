@@ -77,7 +77,7 @@ async def handle_class_selection(update: Update, context: CallbackContext) -> No
         return
 
     response = f"Заміни для {class_name} на {class_subs['Дата'].iloc[0]}:\n"
-    for col in [f"Урок {i}" for i in range(1, 9)]:
+    for col in [f"Урок {i}" for i in range(0, 8)]:
         value = class_subs[col].iloc[0]
         if value and value != "":
             response += f"{col}: {value}\n"
@@ -106,7 +106,7 @@ async def handle_text(update: Update, context: CallbackContext) -> None:
             lines = message_text.split('\n')
             data = [line.split(',') for line in lines]
             new_df = pd.DataFrame(data[1:], columns=data[0])
-            required_columns = ["Дата", "Клас"] + [f"Урок {i}" for i in range(1, 9)]
+            required_columns = ["Дата", "Клас"] + [f"Урок {i}" for i in range(0, 8)]
             if not all(col in new_df.columns for col in required_columns):
                 await update.message.reply_text("Формат таблиці не відповідає встановленому")
                 return
@@ -126,7 +126,7 @@ async def handle_text(update: Update, context: CallbackContext) -> None:
                     await update.message.reply_text(f"Для класу {class_name} немає замін.")
                     return
                 response = f"Заміни для {class_name} на {class_subs['Дата'].iloc[0]}:\n"
-                for col in [f"Урок {i}" for i in range(1, 9)]:
+                for col in [f"Урок {i}" for i in range(0, 8)]:
                     value = class_subs[col].iloc[0]
                     if value and value != "":
                         response += f"{col}: {value}\n"

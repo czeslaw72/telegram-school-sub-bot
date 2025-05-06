@@ -2,7 +2,7 @@ import os
 import pandas as pd
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackContext, CallbackQueryHandler
-from telegram.ext.filters import BaseFilter
+from telegram.ext.filters import BaseFilter, Document
 from docx import Document
 
 # Отримуємо токен з змінних середовища
@@ -63,7 +63,7 @@ async def button(update: Update, context: CallbackContext) -> None:
     elif query.data == 'update_subs':
         context.user_data.clear()
         context.user_data['awaiting_password'] = True
-        await query.message.reply_text("Введіть пароль адміністратора або надішліть .docx файл із таблицею:")
+        await query.message.reply_text("Введіть пароль адміністратора:")
 
 # Обробка вибору класу
 async def handle_class_selection(update: Update, context: CallbackContext) -> None:
@@ -83,62 +83,44 @@ async def handle_class_selection(update: Update, context: CallbackContext) -> No
             response += f"{col}: {value}\n"
     await query.message.reply_text(response)
 
-# Обробка текстових повідомлень та файлів
-async def handle_message(update: Update, context: CallbackContext) -> None:
+# Обробка текстових повідомлень
+async def handle_text(update: Update, context: CallbackContext) -> None:
     global substitutions_df
     print(f"User data: {context.user_data}")
+    message_text = update.message.text
 
-    # Обробка пароля або файлу
+    # Перевірка пароля для адміністратора
     if context.user_data.get('awaiting_password'):
-        if update.message.text:
-            if check_admin(update.message.text):
-                context.user_data['is_admin'] = True
-                context.user_data.pop('awaiting_password')
-                await update.message.reply_text("Пароль правильний! Надішліть таблицю замін у форматі:\nДата,Клас,Урок 1,Урок 2,Урок 3,Урок 4,Урок 5,Урок 6,Урок 7,Урок 8\nАбо надішліть .docx файл із таблицею.")
-            else:
-                await update.message.reply_text("Неправильний пароль! Спробуйте ще раз:")
-        elif update.message.document and update.message.document.file_name.endswith('.docx'):
-            file = await update.message.document.get_file()
-            file_path = await file.download_to_drive()
-            try:
-                new_df = extract_table_from_docx(file_path)
-                required_columns = ["Дата", "Клас"] + [f"Урок {i}" for i in range(1, 9)]
-                if not all(col in new_df.columns for col in required_columns):
-                    await update.message.reply_text("Таблиця повинна містити колонки: Дата, Клас, Урок 1–Урок 8!")
-                    return
-                substitutions_df = new_df
-                context.user_data.pop('awaiting_password')
-                await update.message.reply_text("Таблицю успішно оновлено з .docx файлу!")
-            except Exception as e:
-                await update.message.reply_text(f"Помилка при обробці .docx файлу: {str(e)}")
-            finally:
-                import os
-                os.remove(file_path)  # Видаляємо тимчасовий файл
+        if check_admin(message_text):
+            context.user_data['is_admin'] = True
+            context.user_data.pop('awaiting_password')
+            await update.message.reply_text("Пароль правильний! Надішліть таблицю замін у форматі:\nДата,Клас,Урок 1,Урок 2,Урок 3,Урок 4,Урок 5,Урок 6,Урок 7,Урок 8\nАбо надішліть .docx файл із таблицею.")
+        else:
+            await update.message.reply_text("Неправильний пароль! Спробуйте ще раз:")
         return
 
     # Оновлення таблиці текстом (для сумісності)
     if context.user_data.get('is_admin'):
         print("Admin mode active, processing table update")
-        if update.message.text:
-            try:
-                lines = update.message.text.split('\n')
-                data = [line.split(',') for line in lines]
-                new_df = pd.DataFrame(data[1:], columns=data[0])
-                required_columns = ["Дата", "Клас"] + [f"Урок {i}" for i in range(1, 9)]
-                if not all(col in new_df.columns for col in required_columns):
-                    await update.message.reply_text("Таблиця повинна містити колонки: Дата, Клас, Урок 1–Урок 8!")
-                    return
-                substitutions_df = new_df
-                context.user_data.pop('is_admin')
-                await update.message.reply_text("Таблицю успішно оновлено!")
-            except Exception as e:
-                await update.message.reply_text(f"Помилка при оновленні таблиці: {str(e)}")
+        try:
+            lines = message_text.split('\n')
+            data = [line.split(',') for line in lines]
+            new_df = pd.DataFrame(data[1:], columns=data[0])
+            required_columns = ["Дата", "Клас"] + [f"Урок {i}" for i in range(1, 9)]
+            if not all(col in new_df.columns for col in required_columns):
+                await update.message.reply_text("Таблиця повинна містити колонки: Дата, Клас, Урок 1–Урок 8!")
+                return
+            substitutions_df = new_df
+            context.user_data.pop('is_admin')
+            await update.message.reply_text("Таблицю успішно оновлено!")
+        except Exception as e:
+            await update.message.reply_text(f"Помилка при оновленні таблиці: {str(e)}")
         return
 
     # Обробка звичайного запиту
-    if "які заміни" in update.message.text.lower() if update.message.text else False:
+    if "які заміни" in message_text.lower():
         for class_name in substitutions_df["Клас"].unique():
-            if class_name.lower() in update.message.text.lower():
+            if class_name.lower() in message_text.lower():
                 class_subs = substitutions_df[substitutions_df["Клас"] == class_name]
                 if class_subs.empty:
                     await update.message.reply_text(f"Для класу {class_name} немає замін.")
@@ -154,6 +136,33 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
     else:
         await update.message.reply_text("Я розумію запити типу 'Які заміни в 6-А?'. Спробуйте ще раз!")
 
+# Обробка .docx файлів
+async def handle_docx(update: Update, context: CallbackContext) -> None:
+    global substitutions_df
+    print(f"User data: {context.user_data}")
+
+    if not context.user_data.get('is_admin'):
+        await update.message.reply_text("Спочатку увійдіть у режим адміністратора, натиснувши 'Оновити таблицю (Адмін)' і ввівши пароль.")
+        return
+
+    if update.message.document and update.message.document.file_name.endswith('.docx'):
+        file = await update.message.document.get_file()
+        file_path = await file.download_to_drive()
+        try:
+            new_df = extract_table_from_docx(file_path)
+            required_columns = ["Дата", "Клас"] + [f"Урок {i}" for i in range(1, 9)]
+            if not all(col in new_df.columns for col in required_columns):
+                await update.message.reply_text("Таблиця повинна містити колонки: Дата, Клас, Урок 1–Урок 8!")
+                return
+            substitutions_df = new_df
+            context.user_data.pop('is_admin')
+            await update.message.reply_text("Таблицю успішно оновлено з .docx файлу!")
+        except Exception as e:
+            await update.message.reply_text(f"Помилка при обробці .docx файлу: {str(e)}")
+        finally:
+            import os
+            os.remove(file_path)  # Видаляємо тимчасовий файл
+
 # Запуск бота
 def main() -> None:
     application = Application.builder().token(TOKEN).build()
@@ -161,7 +170,8 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(button, pattern='^(view_subs|update_subs)$'))
     application.add_handler(CallbackQueryHandler(handle_class_selection, pattern='^class_'))
-    application.add_handler(MessageHandler(BaseFilter(), handle_message))
+    application.add_handler(MessageHandler(BaseFilter(), handle_text))
+    application.add_handler(MessageHandler(Document.ALL, handle_docx))
 
     application.run_polling()
 

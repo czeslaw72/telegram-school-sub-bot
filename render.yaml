@@ -1,0 +1,16 @@
+services:
+- type: web
+  name: telegram-bot
+  env: python
+  buildCommand: pip install -r requirements.txt
+  startCommand: python telegram-bot.py
+  envVars:
+  - key: TELEGRAM_BOT_TOKEN
+    fromDatabase:
+      name: bot-token
+      property: token
+  regions:
+  - oregon
+  plan: free
+  healthCheckPath: /
+  autoDeploy: true

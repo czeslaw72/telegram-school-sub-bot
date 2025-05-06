@@ -1,31 +1,54 @@
 import os
+import json
 import pandas as pd
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackContext, CallbackQueryHandler
 from telegram.ext.filters import BaseFilter, Document as TelegramDocument
 from docx import Document
 
-# Отримуємо токен і URL з змінних середовища
+# Отримуємо токен із змінних середовища
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "https://your-service-name.onrender.com")
 
-# Ініціалізація таблиці замін
-initial_data = {
-    "Дата": ["02.05.2025", "02.05.2025", "02.05.2025", "02.05.2025"],
-    "Клас": ["6-А", "6-Б", "7-А", "7-Б"],
-    "Урок 0": ["За.рл", "", "", ""],
-    "Урок 1": ["", "Матем", "Теометр", "Фіз.л"],
-    "Урок 2": ["", "", "Укр.м", "Укр.м"],
-    "Урок 3": ["", "Муз.м", "", "Теометр"],
-    "Урок 4": ["", "", "", "Нім.м"],
-    "Урок 5": ["", "", "", ""],
-    "Урок 6": ["", "", "", ""],
-    "Урок 7": ["", "", "", ""]
-}
-substitutions_df = pd.DataFrame(initial_data)
-
-# Пароль адміністратора
+# Ініціалізація даних
+DATA_FILE = "bot_data.json"
 ADMIN_PASSWORD = "admin123"
+
+# Завантаження даних із JSON або ініціалізація початкових даних
+def load_data():
+    initial_data = {
+        "substitutions": {
+            "Дата": ["02.05.2025", "02.05.2025", "02.05.2025", "02.05.2025"],
+            "Клас": ["6-А", "6-Б", "7-А", "7-Б"],
+            "Урок 0": ["За.рл", "", "", ""],
+            "Урок 1": ["", "Матем", "Теометр", "Фіз.л"],
+            "Урок 2": ["", "", "Укр.м", "Укр.м"],
+            "Урок 3": ["", "Муз.м", "", "Теометр"],
+            "Урок 4": ["", "", "", "Нім.м"],
+            "Урок 5": ["", "", "", ""],
+            "Урок 6": ["", "", "", ""],
+            "Урок 7": ["", "", "", ""]
+        },
+        "alert_mode": False,
+        "users": []
+    }
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    else:
+        data = initial_data
+        save_data(data)
+    return data
+
+# Збереження даних у JSON
+def save_data(data):
+    with open(DATA_FILE, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+
+# Ініціалізація даних
+data = load_data()
+substitutions_df = pd.DataFrame(data["substitutions"])
+alert_mode = data["alert_mode"]
+users = data["users"]
 
 # Перевірка пароля
 def check_admin(password):
@@ -45,9 +68,17 @@ def extract_table_from_docx(file_path):
 
 # Функція для старту бота
 async def start(update: Update, context: CallbackContext) -> None:
+    global users
+    user_id = update.effective_user.id
+    if user_id not in users:
+        users.append(user_id)
+        data["users"] = users
+        save_data(data)
+
     keyboard = [
         [InlineKeyboardButton("Переглянути заміни", callback_data='view_subs')],
-        [InlineKeyboardButton("Оновити таблицю (Адмін)", callback_data='update_subs')]
+        [InlineKeyboardButton("Оновити таблицю (Адмін)", callback_data='update_subs')],
+        [InlineKeyboardButton("Режим тривоги (Адмін)", callback_data='toggle_alert')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("Вітаю! Я бот для перегляду замін уроків. Оберіть опцію:", reply_markup=reply_markup)
@@ -64,6 +95,12 @@ async def button(update: Update, context: CallbackContext) -> None:
     elif query.data == 'update_subs':
         context.user_data.clear()
         context.user_data['awaiting_password'] = True
+        context.user_data['action'] = 'update_subs'
+        await query.message.reply_text("Введіть пароль адміністратора:")
+    elif query.data == 'toggle_alert':
+        context.user_data.clear()
+        context.user_data['awaiting_password'] = True
+        context.user_data['action'] = 'toggle_alert'
         await query.message.reply_text("Введіть пароль адміністратора:")
 
 # Обробка вибору класу
@@ -80,14 +117,23 @@ async def handle_class_selection(update: Update, context: CallbackContext) -> No
     response = f"Заміни для {class_name} на {class_subs['Дата'].iloc[0]}:\n"
     for col in [f"Урок {i}" for i in range(0, 8)]:
         value = class_subs[col].iloc[0]
-        if value and value != "":
+        if value and value != "" and value != "-":
             response += f"{col}: {value}\n"
+    if alert_mode:
+        response += "\n⚠️ Увага: у зв’язку з тривогою навчання проводиться дистанційно!"
     await query.message.reply_text(response)
+
+# Повідомлення всіх користувачів про тривогу
+async def notify_users(context: CallbackContext, message: str):
+    for user_id in users:
+        try:
+            await context.bot.send_message(chat_id=user_id, text=message)
+        except Exception as e:
+            print(f"Не вдалося надіслати повідомлення користувачу {user_id}: {e}")
 
 # Обробка текстових повідомлень
 async def handle_text(update: Update, context: CallbackContext) -> None:
-    global substitutions_df
-    print(f"User data: {context.user_data}")
+    global substitutions_df, alert_mode, data
     message_text = update.message.text
 
     # Перевірка пароля для адміністратора
@@ -95,30 +141,19 @@ async def handle_text(update: Update, context: CallbackContext) -> None:
         if check_admin(message_text):
             context.user_data['is_admin'] = True
             context.user_data.pop('awaiting_password')
-            await update.message.reply_text("Пароль правильний! Надішліть .docx файл із таблицею.")
+            action = context.user_data.get('action')
+            if action == 'update_subs':
+                await update.message.reply_text("Пароль правильний! Надішліть .docx файл із таблицею.")
+            elif action == 'toggle_alert':
+                alert_mode = not alert_mode
+                data["alert_mode"] = alert_mode
+                save_data(data)
+                status = "увімкнено" if alert_mode else "вимкнено"
+                message = f"⚠️ Режим тривоги {status}! Навчання буде проводитися дистанційно." if alert_mode else "✅ Тривогу скасовано. Навчання повертається до звичайного режиму."
+                await notify_users(context, message)
+                await update.message.reply_text(f"Режим тривоги {status}.")
         else:
             await update.message.reply_text("Неправильний пароль! Спробуйте ще раз:")
-        return
-
-    # Оновлення таблиці текстом (для сумісності)
-    if context.user_data.get('is_admin'):
-        print("Admin mode active, processing table update")
-        if message_text is None or not message_text.strip():
-            await update.message.reply_text("Надішліть таблицю у форматі:\nДата,Клас,Урок 0,Урок 1,Урок 2,Урок 3,Урок 4,Урок 5,Урок 6,Урок 7\nПриклад:\n02.05.2025,6-А,Матем,,,,,,,")
-            return
-        try:
-            lines = message_text.split('\n')
-            data = [line.split(',') for line in lines]
-            new_df = pd.DataFrame(data[1:], columns=data[0])
-            required_columns = ["Дата", "Клас"] + [f"Урок {i}" for i in range(0, 8)]
-            if not all(col in new_df.columns for col in required_columns):
-                await update.message.reply_text("Формат таблиці не відповідає встановленому")
-                return
-            substitutions_df = new_df
-            context.user_data.pop('is_admin')
-            await update.message.reply_text("Таблицю успішно оновлено!")
-        except Exception as e:
-            await update.message.reply_text(f"Помилка при оновленні таблиці: {str(e)}")
         return
 
     # Обробка звичайного запиту
@@ -132,8 +167,10 @@ async def handle_text(update: Update, context: CallbackContext) -> None:
                 response = f"Заміни для {class_name} на {class_subs['Дата'].iloc[0]}:\n"
                 for col in [f"Урок {i}" for i in range(0, 8)]:
                     value = class_subs[col].iloc[0]
-                    if value and value != "":
+                    if value and value != "" and value != "-":
                         response += f"{col}: {value}\n"
+                if alert_mode:
+                    response += "\n⚠️ Увага: у зв’язку з тривогою навчання проводиться дистанційно!"
                 await update.message.reply_text(response)
                 return
         await update.message.reply_text("Будь ласка, вкажіть клас (наприклад, 'Які заміни в 6-А?').")
@@ -142,9 +179,7 @@ async def handle_text(update: Update, context: CallbackContext) -> None:
 
 # Обробка .docx файлів
 async def handle_docx(update: Update, context: CallbackContext) -> None:
-    global substitutions_df
-    print(f"User data: {context.user_data}")
-
+    global substitutions_df, data
     if not context.user_data.get('is_admin'):
         await update.message.reply_text("Спочатку увійдіть у режим адміністратора, натиснувши 'Оновити таблицю (Адмін)' і ввівши пароль.")
         return
@@ -159,12 +194,13 @@ async def handle_docx(update: Update, context: CallbackContext) -> None:
                 await update.message.reply_text("Формат таблиці не відповідає встановленому")
                 return
             substitutions_df = new_df
+            data["substitutions"] = substitutions_df.to_dict()
+            save_data(data)
             context.user_data.pop('is_admin')
             await update.message.reply_text("Таблицю успішно оновлено з .docx файлу!")
         except Exception as e:
             await update.message.reply_text(f"Помилка при обробці .docx файлу: {str(e)}")
         finally:
-            import os
             os.remove(file_path)  # Видаляємо тимчасовий файл
 
 # Запуск бота
@@ -172,18 +208,12 @@ def main() -> None:
     application = Application.builder().token(TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CallbackQueryHandler(button, pattern='^(view_subs|update_subs)$'))
+    application.add_handler(CallbackQueryHandler(button, pattern='^(view_subs|update_subs|toggle_alert)$'))
     application.add_handler(CallbackQueryHandler(handle_class_selection, pattern='^class_'))
     application.add_handler(MessageHandler(BaseFilter(), handle_text))
     application.add_handler(MessageHandler(TelegramDocument(), handle_docx))
 
-    # Налаштування Webhook
-    application.run_webhook(
-        listen="0.0.0.0",
-        port=8000,  # Порт, який використовується на Render
-        url_path=TOKEN,
-        webhook_url=f"{WEBHOOK_URL}/{TOKEN}"
-    )
+    application.run_polling()
 
 if __name__ == '__main__':
     main()

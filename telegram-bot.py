@@ -56,15 +56,36 @@ def check_admin(password):
 
 # Функція для витягнення таблиці з .docx
 def extract_table_from_docx(file_path):
-    doc = Document(file_path)
-    table = doc.tables[0]  # Беремо першу таблицю
-    data = []
-    headers = [cell.text.strip() for cell in table.rows[0].cells if cell.text.strip()]
-    for row in table.rows[1:]:
-        row_data = [cell.text.strip() for cell in row.cells if cell.text.strip()]
-        if row_data:  # Пропускаємо порожні рядки
-            data.append(row_data)
-    return pd.DataFrame(data, columns=headers)
+    try:
+        doc = Document(file_path)
+        if not doc.tables:
+            raise ValueError("У документі немає таблиць")
+        
+        # Беремо першу таблицю
+        table = doc.tables[0]
+        data = []
+        # Отримуємо заголовки
+        headers = [cell.text.strip() for cell in table.rows[0].cells if cell.text.strip()]
+        print(f"Отримані заголовки таблиці: {headers}")  # Додаємо логування
+        
+        # Перевіряємо, чи є потрібні заголовки
+        required_headers = ["Дата", "Клас"] + [f"Урок {i}" for i in range(0, 8)]
+        missing_headers = [h for h in required_headers if h not in headers]
+        if missing_headers:
+            raise ValueError(f"Відсутні необхідні стовпці: {missing_headers}")
+        
+        # Зчитуємо дані
+        for row in table.rows[1:]:
+            row_data = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+            if row_data:  # Пропускаємо порожні рядки
+                # Доповнюємо рядок, якщо він коротший за кількість заголовків
+                while len(row_data) < len(headers):
+                    row_data.append("")
+                data.append(row_data)
+        
+        return pd.DataFrame(data, columns=headers)
+    except Exception as e:
+        raise Exception(f"Помилка при зчитуванні таблиці: {str(e)}")
 
 # Функція для старту бота
 async def start(update: Update, context: CallbackContext) -> None:
@@ -186,12 +207,13 @@ async def handle_docx(update: Update, context: CallbackContext) -> None:
 
     if update.message.document and update.message.document.file_name.endswith('.docx'):
         file = await update.message.document.get_file()
-        file_path = await file.download_to_drive()
         try:
+            file_path = await file.download_to_drive()
+            print(f"Завантажено файл: {file_path}")  # Додаємо логування
             new_df = extract_table_from_docx(file_path)
             required_columns = ["Дата", "Клас"] + [f"Урок {i}" for i in range(0, 8)]
             if not all(col in new_df.columns for col in required_columns):
-                await update.message.reply_text("Формат таблиці не відповідає встановленому")
+                await update.message.reply_text("Формат таблиці не відповідає встановленому. Очікувані стовпці: " + ", ".join(required_columns))
                 return
             substitutions_df = new_df
             data["substitutions"] = substitutions_df.to_dict()
@@ -201,7 +223,9 @@ async def handle_docx(update: Update, context: CallbackContext) -> None:
         except Exception as e:
             await update.message.reply_text(f"Помилка при обробці .docx файлу: {str(e)}")
         finally:
-            os.remove(file_path)  # Видаляємо тимчасовий файл
+            if 'file_path' in locals():
+                os.remove(file_path)  # Видаляємо тимчасовий файл
+                print(f"Видалено тимчасовий файл: {file_path}")
 
 # Запуск бота
 def main() -> None:

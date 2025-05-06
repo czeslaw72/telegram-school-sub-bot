@@ -4,7 +4,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, Filters, CallbackContext, CallbackQueryHandler
 
 # Отримуємо токен з змінних середовища
-TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "7768575905:AAGyQj1peAzjZoB1ZuZ8XV0EbmBTELPRAn8")
 
 # Ініціалізація таблиці замін
 initial_data = {

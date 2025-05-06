@@ -1,16 +1,17 @@
 services:
-- type: web
-  name: telegram-bot
-  env: python
-  buildCommand: pip install -r requirements.txt
-  startCommand: python telegram-bot.py
-  envVars:
-  - key: TELEGRAM_BOT_TOKEN
-    fromDatabase:
-      name: bot-token
-      property: token
-  regions:
-  - oregon
-  plan: free
-  healthCheckPath: /
-  autoDeploy: true
+  - type: web
+    name: telegram-bot
+    env: python
+    repo: https://github.com/czeslaw72/telegram-school-sub-bot
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: python telegram-bot.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: WEBHOOK_URL
+        sync: false
+      - key: PORT
+        value: 8000

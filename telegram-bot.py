@@ -32,8 +32,14 @@ def load_data():
         "users": []
     }
     if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+        try:
+            with open(DATA_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            print("Дані успішно завантажені з bot_data.json")
+        except Exception as e:
+            print(f"Помилка при завантаженні bot_data.json: {e}")
+            data = initial_data
+            save_data(data)
     else:
         data = initial_data
         save_data(data)
@@ -41,8 +47,12 @@ def load_data():
 
 # Збереження даних у JSON
 def save_data(data):
-    with open(DATA_FILE, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
+    try:
+        with open(DATA_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+        print("Дані успішно збережені в bot_data.json")
+    except Exception as e:
+        print(f"Помилка при збереженні bot_data.json: {e}")
 
 # Ініціалізація даних
 data = load_data()
@@ -209,7 +219,7 @@ async def handle_docx(update: Update, context: CallbackContext) -> None:
         file = await update.message.document.get_file()
         try:
             file_path = await file.download_to_drive()
-            print(f"Завантажено файл: {file_path}")  # Додаємо логування
+            print(f"Завантажено файл: {file_path}")
             new_df = extract_table_from_docx(file_path)
             required_columns = ["Дата", "Клас"] + [f"Урок {i}" for i in range(0, 8)]
             if not all(col in new_df.columns for col in required_columns):
@@ -218,13 +228,14 @@ async def handle_docx(update: Update, context: CallbackContext) -> None:
             substitutions_df = new_df
             data["substitutions"] = substitutions_df.to_dict()
             save_data(data)
+            print(f"Оновлена таблиця замін:\n{substitutions_df.to_string()}")  # Логуємо оновлену таблицю
             context.user_data.pop('is_admin')
             await update.message.reply_text("Таблицю успішно оновлено з .docx файлу!")
         except Exception as e:
             await update.message.reply_text(f"Помилка при обробці .docx файлу: {str(e)}")
         finally:
             if 'file_path' in locals():
-                os.remove(file_path)  # Видаляємо тимчасовий файл
+                os.remove(file_path)
                 print(f"Видалено тимчасовий файл: {file_path}")
 
 # Запуск бота
@@ -237,7 +248,8 @@ def main() -> None:
     application.add_handler(MessageHandler(BaseFilter(), handle_text))
     application.add_handler(MessageHandler(TelegramDocument(), handle_docx))
 
-    application.run_polling()
+    # Використовуємо drop_pending_updates, щоб уникнути конфліктів
+    application.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
     main()

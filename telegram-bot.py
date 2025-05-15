@@ -1,6 +1,7 @@
 import os
 import re
 import pandas as pd
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackContext, CallbackQueryHandler
 from telegram.ext.filters import BaseFilter, Document as TelegramDocument
@@ -41,7 +42,9 @@ def check_admin(password):
 def clean_html_tags(text):
     if not isinstance(text, str):
         return ""
-    return re.sub(r'<[^>]+>', '', text).strip()
+    cleaned = re.sub(r'<[^>]+>', '', text).strip()
+    print(f"Очищено текст: '{text}' -> '{cleaned}'")
+    return cleaned
 
 # Функція для витягнення таблиці з .docx
 def extract_table_from_docx(file_path):
@@ -72,7 +75,9 @@ def extract_table_from_docx(file_path):
                     row_data.append("")
                 data.append(row_data)
         
-        return pd.DataFrame(data, columns=headers)
+        df = pd.DataFrame(data, columns=headers)
+        print(f"Зчитана таблиця:\n{df.to_string()}")
+        return df
     except Exception as e:
         raise Exception(f"Помилка при зчитуванні таблиці: {str(e)}")
 
@@ -123,6 +128,8 @@ async def handle_class_selection(update: Update, context: CallbackContext) -> No
     query = update.callback_query
     await query.answer()
     class_name = query.data.split('_')[1]
+    print(f"Запит замін для класу: {class_name}")
+    print(f"Поточна таблиця замін:\n{substitutions_df.to_string()}")
     class_subs = substitutions_df[substitutions_df["Клас"] == class_name]
 
     if class_subs.empty:
@@ -176,6 +183,8 @@ async def handle_text(update: Update, context: CallbackContext) -> None:
 
     # Обробка звичайного запиту
     if "які заміни" in message_text.lower():
+        print(f"Запит через текст: {message_text}")
+        print(f"Поточна таблиця замін:\n{substitutions_df.to_string()}")
         for class_name in substitutions_df["Клас"].unique():
             if class_name.lower() in message_text.lower():
                 class_subs = substitutions_df[substitutions_df["Клас"] == class_name]
@@ -224,7 +233,7 @@ async def handle_docx(update: Update, context: CallbackContext) -> None:
                 print(f"Видалено тимчасовий файл: {file_path}")
 
 # Запуск бота
-def main() -> None:
+async def async_main():
     application = Application.builder().token(TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
@@ -234,8 +243,11 @@ def main() -> None:
     application.add_handler(MessageHandler(BaseFilter(), handle_text))
     application.add_handler(MessageHandler(TelegramDocument(), handle_docx))
 
-    # Використовуємо drop_pending_updates, щоб уникнути конфліктів
-    application.run_polling(drop_pending_updates=True)
+    # Затримка перед запуском polling
+    print("Чекаємо 5 секунд перед запуском polling...")
+    await asyncio.sleep(5)
+    print("Запускаємо polling...")
+    await application.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
-    main()
+    asyncio.run(async_main())

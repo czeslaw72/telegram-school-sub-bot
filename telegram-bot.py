@@ -1,5 +1,5 @@
 import os
-import json
+import re
 import pandas as pd
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackContext, CallbackQueryHandler
@@ -9,60 +9,39 @@ from docx import Document
 # Отримуємо токен із змінних середовища
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
 
-# Ініціалізація даних
-DATA_FILE = "bot_data.json"
+# Ініціалізація початкових даних
+INITIAL_DATA = {
+    "substitutions": {
+        "Дата": ["02.05.2025", "02.05.2025", "02.05.2025", "02.05.2025"],
+        "Клас": ["6-А", "6-Б", "7-А", "7-Б"],
+        "Урок 0": ["За.рл", "", "", ""],
+        "Урок 1": ["", "Матем", "Теометр", "Фіз.л"],
+        "Урок 2": ["", "", "Укр.м", "Укр.м"],
+        "Урок 3": ["", "Муз.м", "", "Теометр"],
+        "Урок 4": ["", "", "", "Нім.м"],
+        "Урок 5": ["", "", "", ""],
+        "Урок 6": ["", "", "", ""],
+        "Урок 7": ["", "", "", ""]
+    },
+    "alert_mode": False,
+    "users": []
+}
+
+# Глобальні змінні
+substitutions_df = pd.DataFrame(INITIAL_DATA["substitutions"])
+alert_mode = INITIAL_DATA["alert_mode"]
+users = INITIAL_DATA["users"]
 ADMIN_PASSWORD = "admin123"
-
-# Завантаження даних із JSON або ініціалізація початкових даних
-def load_data():
-    initial_data = {
-        "substitutions": {
-            "Дата": ["02.05.2025", "02.05.2025", "02.05.2025", "02.05.2025"],
-            "Клас": ["6-А", "6-Б", "7-А", "7-Б"],
-            "Урок 0": ["За.рл", "", "", ""],
-            "Урок 1": ["", "Матем", "Теометр", "Фіз.л"],
-            "Урок 2": ["", "", "Укр.м", "Укр.м"],
-            "Урок 3": ["", "Муз.м", "", "Теометр"],
-            "Урок 4": ["", "", "", "Нім.м"],
-            "Урок 5": ["", "", "", ""],
-            "Урок 6": ["", "", "", ""],
-            "Урок 7": ["", "", "", ""]
-        },
-        "alert_mode": False,
-        "users": []
-    }
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            print("Дані успішно завантажені з bot_data.json")
-        except Exception as e:
-            print(f"Помилка при завантаженні bot_data.json: {e}")
-            data = initial_data
-            save_data(data)
-    else:
-        data = initial_data
-        save_data(data)
-    return data
-
-# Збереження даних у JSON
-def save_data(data):
-    try:
-        with open(DATA_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-        print("Дані успішно збережені в bot_data.json")
-    except Exception as e:
-        print(f"Помилка при збереженні bot_data.json: {e}")
-
-# Ініціалізація даних
-data = load_data()
-substitutions_df = pd.DataFrame(data["substitutions"])
-alert_mode = data["alert_mode"]
-users = data["users"]
 
 # Перевірка пароля
 def check_admin(password):
     return password == ADMIN_PASSWORD
+
+# Очищення HTML-тегів із тексту
+def clean_html_tags(text):
+    if not isinstance(text, str):
+        return ""
+    return re.sub(r'<[^>]+>', '', text).strip()
 
 # Функція для витягнення таблиці з .docx
 def extract_table_from_docx(file_path):
@@ -76,7 +55,7 @@ def extract_table_from_docx(file_path):
         data = []
         # Отримуємо заголовки
         headers = [cell.text.strip() for cell in table.rows[0].cells if cell.text.strip()]
-        print(f"Отримані заголовки таблиці: {headers}")  # Додаємо логування
+        print(f"Отримані заголовки таблиці: {headers}")
         
         # Перевіряємо, чи є потрібні заголовки
         required_headers = ["Дата", "Клас"] + [f"Урок {i}" for i in range(0, 8)]
@@ -86,8 +65,8 @@ def extract_table_from_docx(file_path):
         
         # Зчитуємо дані
         for row in table.rows[1:]:
-            row_data = [cell.text.strip() for cell in row.cells if cell.text.strip()]
-            if row_data:  # Пропускаємо порожні рядки
+            row_data = [clean_html_tags(cell.text) for cell in row.cells]
+            if any(row_data):  # Пропускаємо повністю порожні рядки
                 # Доповнюємо рядок, якщо він коротший за кількість заголовків
                 while len(row_data) < len(headers):
                     row_data.append("")
@@ -103,8 +82,6 @@ async def start(update: Update, context: CallbackContext) -> None:
     user_id = update.effective_user.id
     if user_id not in users:
         users.append(user_id)
-        data["users"] = users
-        save_data(data)
 
     keyboard = [
         [InlineKeyboardButton("Переглянути заміни", callback_data='view_subs')],
@@ -113,6 +90,13 @@ async def start(update: Update, context: CallbackContext) -> None:
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("Вітаю! Я бот для перегляду замін уроків. Оберіть опцію:", reply_markup=reply_markup)
+
+# Скидання даних до початкових (для адміна)
+async def reset(update: Update, context: CallbackContext) -> None:
+    context.user_data.clear()
+    context.user_data['awaiting_password'] = True
+    context.user_data['action'] = 'reset'
+    await update.message.reply_text("Введіть пароль адміністратора для скидання даних:")
 
 # Обробка кнопок
 async def button(update: Update, context: CallbackContext) -> None:
@@ -164,7 +148,7 @@ async def notify_users(context: CallbackContext, message: str):
 
 # Обробка текстових повідомлень
 async def handle_text(update: Update, context: CallbackContext) -> None:
-    global substitutions_df, alert_mode, data
+    global substitutions_df, alert_mode, users
     message_text = update.message.text
 
     # Перевірка пароля для адміністратора
@@ -177,12 +161,15 @@ async def handle_text(update: Update, context: CallbackContext) -> None:
                 await update.message.reply_text("Пароль правильний! Надішліть .docx файл із таблицею.")
             elif action == 'toggle_alert':
                 alert_mode = not alert_mode
-                data["alert_mode"] = alert_mode
-                save_data(data)
                 status = "увімкнено" if alert_mode else "вимкнено"
                 message = f"⚠️ Режим тривоги {status}! Навчання буде проводитися дистанційно." if alert_mode else "✅ Тривогу скасовано. Навчання повертається до звичайного режиму."
                 await notify_users(context, message)
                 await update.message.reply_text(f"Режим тривоги {status}.")
+            elif action == 'reset':
+                substitutions_df = pd.DataFrame(INITIAL_DATA["substitutions"])
+                alert_mode = INITIAL_DATA["alert_mode"]
+                users = INITIAL_DATA["users"]
+                await update.message.reply_text("Дані скинуто до початкових!")
         else:
             await update.message.reply_text("Неправильний пароль! Спробуйте ще раз:")
         return
@@ -210,7 +197,7 @@ async def handle_text(update: Update, context: CallbackContext) -> None:
 
 # Обробка .docx файлів
 async def handle_docx(update: Update, context: CallbackContext) -> None:
-    global substitutions_df, data
+    global substitutions_df
     if not context.user_data.get('is_admin'):
         await update.message.reply_text("Спочатку увійдіть у режим адміністратора, натиснувши 'Оновити таблицю (Адмін)' і ввівши пароль.")
         return
@@ -226,9 +213,7 @@ async def handle_docx(update: Update, context: CallbackContext) -> None:
                 await update.message.reply_text("Формат таблиці не відповідає встановленому. Очікувані стовпці: " + ", ".join(required_columns))
                 return
             substitutions_df = new_df
-            data["substitutions"] = substitutions_df.to_dict()
-            save_data(data)
-            print(f"Оновлена таблиця замін:\n{substitutions_df.to_string()}")  # Логуємо оновлену таблицю
+            print(f"Оновлена таблиця замін:\n{substitutions_df.to_string()}")
             context.user_data.pop('is_admin')
             await update.message.reply_text("Таблицю успішно оновлено з .docx файлу!")
         except Exception as e:
@@ -243,6 +228,7 @@ def main() -> None:
     application = Application.builder().token(TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("reset", reset))
     application.add_handler(CallbackQueryHandler(button, pattern='^(view_subs|update_subs|toggle_alert)$'))
     application.add_handler(CallbackQueryHandler(handle_class_selection, pattern='^class_'))
     application.add_handler(MessageHandler(BaseFilter(), handle_text))

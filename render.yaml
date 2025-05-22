@@ -11,3 +11,7 @@ services:
         value: 3.11.11
       - key: TELEGRAM_BOT_TOKEN
         sync: false
+      - key: PORT
+        value: 8000
+      - key: RENDER_EXTERNAL_HOSTNAME
+        sync: false

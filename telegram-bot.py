@@ -2,13 +2,20 @@ import os
 import re
 import pandas as pd
 import asyncio
+import logging
+from aiohttp import web
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackContext, CallbackQueryHandler
 from telegram.ext.filters import BaseFilter, Document as TelegramDocument
 from docx import Document
 
-# Отримуємо токен із змінних середовища
+# Налаштування логування
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Отримуємо токен і порт із змінних середовища
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
+PORT = int(os.environ.get("PORT", 8000))
 
 # Ініціалізація початкових даних
 INITIAL_DATA = {
@@ -43,7 +50,7 @@ def clean_html_tags(text):
     if not isinstance(text, str):
         return ""
     cleaned = re.sub(r'<[^>]+>', '', text).strip()
-    print(f"Очищено текст: '{text}' -> '{cleaned}'")
+    logger.info(f"Очищено текст: '{text}' -> '{cleaned}'")
     return cleaned
 
 # Функція для витягнення таблиці з .docx
@@ -58,7 +65,7 @@ def extract_table_from_docx(file_path):
         data = []
         # Отримуємо заголовки
         headers = [cell.text.strip() for cell in table.rows[0].cells if cell.text.strip()]
-        print(f"Отримані заголовки таблиці: {headers}")
+        logger.info(f"Отримані заголовки таблиці: {headers}")
         
         # Перевіряємо, чи є потрібні заголовки
         required_headers = ["Дата", "Клас"] + [f"Урок {i}" for i in range(0, 8)]
@@ -76,7 +83,7 @@ def extract_table_from_docx(file_path):
                 data.append(row_data)
         
         df = pd.DataFrame(data, columns=headers)
-        print(f"Зчитана таблиця:\n{df.to_string()}")
+        logger.info(f"Зчитана таблиця:\n{df.to_string()}")
         return df
     except Exception as e:
         raise Exception(f"Помилка при зчитуванні таблиці: {str(e)}")
@@ -128,8 +135,8 @@ async def handle_class_selection(update: Update, context: CallbackContext) -> No
     query = update.callback_query
     await query.answer()
     class_name = query.data.split('_')[1]
-    print(f"Запит замін для класу: {class_name}")
-    print(f"Поточна таблиця замін:\n{substitutions_df.to_string()}")
+    logger.info(f"Запит замін для класу: {class_name}")
+    logger.info(f"Поточна таблиця замін:\n{substitutions_df.to_string()}")
     class_subs = substitutions_df[substitutions_df["Клас"] == class_name]
 
     if class_subs.empty:
@@ -151,7 +158,7 @@ async def notify_users(context: CallbackContext, message: str):
         try:
             await context.bot.send_message(chat_id=user_id, text=message)
         except Exception as e:
-            print(f"Не вдалося надіслати повідомлення користувачу {user_id}: {e}")
+            logger.error(f"Не вдалося надіслати повідомлення користувачу {user_id}: {e}")
 
 # Обробка текстових повідомлень
 async def handle_text(update: Update, context: CallbackContext) -> None:
@@ -183,8 +190,8 @@ async def handle_text(update: Update, context: CallbackContext) -> None:
 
     # Обробка звичайного запиту
     if "які заміни" in message_text.lower():
-        print(f"Запит через текст: {message_text}")
-        print(f"Поточна таблиця замін:\n{substitutions_df.to_string()}")
+        logger.info(f"Запит через текст: {message_text}")
+        logger.info(f"Поточна таблиця замін:\n{substitutions_df.to_string()}")
         for class_name in substitutions_df["Клас"].unique():
             if class_name.lower() in message_text.lower():
                 class_subs = substitutions_df[substitutions_df["Клас"] == class_name]
@@ -208,46 +215,81 @@ async def handle_text(update: Update, context: CallbackContext) -> None:
 async def handle_docx(update: Update, context: CallbackContext) -> None:
     global substitutions_df
     if not context.user_data.get('is_admin'):
-        await update.message.reply_text("Спочатку увійдіть у режим адміністратора, натиснувши 'Оновити таблицю (Адмін)' і ввівши пароль.")
+        await update.message.reply_text("Спочочатку увійдіть у режим адміністратора, натиснувши 'Оновити таблицю (Адмін)' і ввівши пароль.")
         return
 
     if update.message.document and update.message.document.file_name.endswith('.docx'):
         file = await update.message.document.get_file()
         try:
             file_path = await file.download_to_drive()
-            print(f"Завантажено файл: {file_path}")
+            logger.info(f"Завантажено файл: {file_path}")
             new_df = extract_table_from_docx(file_path)
             required_columns = ["Дата", "Клас"] + [f"Урок {i}" for i in range(0, 8)]
             if not all(col in new_df.columns for col in required_columns):
                 await update.message.reply_text("Формат таблиці не відповідає встановленому. Очікувані стовпці: " + ", ".join(required_columns))
                 return
             substitutions_df = new_df
-            print(f"Оновлена таблиця замін:\n{substitutions_df.to_string()}")
+            logger.info(f"Оновлена таблиця замін:\n{substitutions_df.to_string()}")
             context.user_data.pop('is_admin')
             await update.message.reply_text("Таблицю успішно оновлено з .docx файлу!")
         except Exception as e:
+            logger.error(f"Помилка при обробці .docx файлу: {str(e)}")
             await update.message.reply_text(f"Помилка при обробці .docx файлу: {str(e)}")
         finally:
             if 'file_path' in locals():
                 os.remove(file_path)
-                print(f"Видалено тимчасовий файл: {file_path}")
+                logger.info(f"Видалено тимчасовий файл: {file_path}")
 
-# Запуск бота
-async def async_main():
-    application = Application.builder().token(TOKEN).build()
+# Обробник Webhook-запитів
+async def webhook(request):
+    app = request.app['telegram_app']
+    update = Update.de_json(await request.json(), app.bot)
+    await app.process_update(update)
+    return web.Response()
 
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("reset", reset))
-    application.add_handler(CallbackQueryHandler(button, pattern='^(view_subs|update_subs|toggle_alert)$'))
-    application.add_handler(CallbackQueryHandler(handle_class_selection, pattern='^class_'))
-    application.add_handler(MessageHandler(BaseFilter(), handle_text))
-    application.add_handler(MessageHandler(TelegramDocument(), handle_docx))
+# Налаштування Webhook
+async def setup_webhook(app: Application, webhook_url: str):
+    logger.info(f"Налаштування Webhook на URL: {webhook_url}")
+    await app.bot.set_webhook(url=webhook_url)
 
-    # Затримка перед запуском polling
-    print("Чекаємо 5 секунд перед запуском polling...")
-    await asyncio.sleep(5)
-    print("Запускаємо polling...")
-    await application.run_polling(drop_pending_updates=True)
+# Головна функція
+async def main():
+    # Ініціалізація Telegram Application
+    app = Application.builder().token(TOKEN).build()
+
+    # Додаємо обробники
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("reset", reset))
+    app.add_handler(CallbackQueryHandler(button, pattern='^(view_subs|update_subs|toggle_alert)$'))
+    app.add_handler(CallbackQueryHandler(handle_class_selection, pattern='^class_'))
+    app.add_handler(MessageHandler(BaseFilter(), handle_text))
+    app.add_handler(MessageHandler(TelegramDocument(), handle_docx))
+
+    # Ініціалізація aiohttp сервера
+    web_app = web.Application()
+    web_app['telegram_app'] = app
+    web_app.router.add_post('/webhook', webhook)
+
+    # Отримуємо URL сервісу з Render (або використовуємо ngrok для тестування локально)
+    webhook_url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME', 'your-service.onrender.com')}/webhook"
+    logger.info(f"Webhook URL: {webhook_url}")
+
+    # Налаштування Webhook
+    await setup_webhook(app, webhook_url)
+
+    # Ініціалізація Telegram Application
+    await app.initialize()
+    await app.start()
+
+    # Запуск веб-сервера
+    runner = web.AppRunner(web_app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', PORT)
+    await site.start()
+    logger.info(f"Сервер запущено на порту {PORT}")
+
+    # Чекаємо безкінечно
+    await asyncio.Event().wait()
 
 if __name__ == '__main__':
-    asyncio.run(async_main())
+    asyncio.run(main())

@@ -35,7 +35,7 @@ INITIAL_DATA = {
     "users": []
 }
 
-# Глобальні змінні
+# Глобальні змінні (тимчасові, поки не перенесемо в bot_data)
 substitutions_df = pd.DataFrame(INITIAL_DATA["substitutions"])
 alert_mode = INITIAL_DATA["alert_mode"]
 users = INITIAL_DATA["users"]
@@ -56,36 +56,49 @@ def clean_html_tags(text):
 # Функція для витягнення таблиці з .docx
 def extract_table_from_docx(file_path):
     try:
+        logger.info("Починаємо зчитування .docx файлу")
         doc = Document(file_path)
         if not doc.tables:
             raise ValueError("У документі немає таблиць")
         
-        # Беремо першу таблицю
         table = doc.tables[0]
         data = []
-        # Отримуємо заголовки
-        headers = [cell.text.strip() for cell in table.rows[0].cells if cell.text.strip()]
+        headers = [cell.text.strip() for cell in table.rows[0].cells]
         logger.info(f"Отримані заголовки таблиці: {headers}")
-        
+
         # Перевіряємо, чи є потрібні заголовки
         required_headers = ["Дата", "Клас"] + [f"Урок {i}" for i in range(0, 8)]
+        if len(headers) != len(required_headers):
+            raise ValueError(f"Очікується {len(required_headers)} стовпців, отримано {len(headers)}")
         missing_headers = [h for h in required_headers if h not in headers]
         if missing_headers:
             raise ValueError(f"Відсутні необхідні стовпці: {missing_headers}")
-        
+
         # Зчитуємо дані
-        for row in table.rows[1:]:
+        for row_idx, row in enumerate(table.rows[1:], start=1):
             row_data = [clean_html_tags(cell.text) for cell in row.cells]
+            logger.info(f"Зчитано сирі дані рядка {row_idx}: {row_data}")
+            if len(row_data) > len(headers):
+                row_data = row_data[:len(headers)]  # Обрізаємо надлишкові дані
+            while len(row_data) < len(headers):
+                row_data.append("")  # Доповнюємо порожніми значеннями
+            logger.info(f"Нормалізовані дані рядка {row_idx}: {row_data}")
             if any(row_data):  # Пропускаємо повністю порожні рядки
-                # Доповнюємо рядок, якщо він коротший за кількість заголовків
-                while len(row_data) < len(headers):
-                    row_data.append("")
                 data.append(row_data)
-        
+
+        if not data:
+            raise ValueError("Таблиця не містить даних після першого рядка")
+
         df = pd.DataFrame(data, columns=headers)
         logger.info(f"Зчитана таблиця:\n{df.to_string()}")
+
+        # Зберігаємо у тимчасовий файл для перевірки
+        temp_csv = "temp_substitutions.csv"
+        df.to_csv(temp_csv, index=False, encoding='utf-8')
+        logger.info(f"Збережено зчитану таблицю в {temp_csv} для ручної перевірки")
         return df
     except Exception as e:
+        logger.error(f"Помилка при зчитуванні таблиці: {str(e)}")
         raise Exception(f"Помилка при зчитуванні таблиці: {str(e)}")
 
 # Функція для старту бота
@@ -94,6 +107,9 @@ async def start(update: Update, context: CallbackContext) -> None:
     user_id = update.effective_user.id
     if user_id not in users:
         users.append(user_id)
+    context.bot_data.setdefault('substitutions_df', substitutions_df.copy())
+    context.bot_data.setdefault('alert_mode', alert_mode)
+    context.bot_data.setdefault('users', users.copy())
 
     keyboard = [
         [InlineKeyboardButton("Переглянути заміни", callback_data='view_subs')],
@@ -116,7 +132,7 @@ async def button(update: Update, context: CallbackContext) -> None:
     await query.answer()
 
     if query.data == 'view_subs':
-        keyboard = [[InlineKeyboardButton(cls, callback_data=f'class_{cls}')] for cls in substitutions_df["Клас"].unique()]
+        keyboard = [[InlineKeyboardButton(cls, callback_data=f'class_{cls}')] for cls in context.bot_data['substitutions_df']["Клас"].unique()]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.message.reply_text("Оберіть клас:", reply_markup=reply_markup)
     elif query.data == 'update_subs':
@@ -136,8 +152,8 @@ async def handle_class_selection(update: Update, context: CallbackContext) -> No
     await query.answer()
     class_name = query.data.split('_')[1]
     logger.info(f"Запит замін для класу: {class_name}")
-    logger.info(f"Поточна таблиця замін:\n{substitutions_df.to_string()}")
-    class_subs = substitutions_df[substitutions_df["Клас"] == class_name]
+    logger.info(f"Поточна таблиця замін перед відповіддю:\n{context.bot_data['substitutions_df'].to_string()}")
+    class_subs = context.bot_data['substitutions_df'][context.bot_data['substitutions_df']["Клас"] == class_name]
 
     if class_subs.empty:
         await query.message.reply_text(f"Для класу {class_name} немає замін.")
@@ -148,13 +164,13 @@ async def handle_class_selection(update: Update, context: CallbackContext) -> No
         value = class_subs[col].iloc[0]
         if value and value != "" and value != "-":
             response += f"{col}: {value}\n"
-    if alert_mode:
+    if context.bot_data['alert_mode']:
         response += "\n⚠️ Увага: у зв’язку з тривогою навчання проводиться дистанційно!"
     await query.message.reply_text(response)
 
 # Повідомлення всіх користувачів про тривогу
 async def notify_users(context: CallbackContext, message: str):
-    for user_id in users:
+    for user_id in context.bot_data['users']:
         try:
             await context.bot.send_message(chat_id=user_id, text=message)
         except Exception as e:
@@ -162,7 +178,6 @@ async def notify_users(context: CallbackContext, message: str):
 
 # Обробка текстових повідомлень
 async def handle_text(update: Update, context: CallbackContext) -> None:
-    global substitutions_df, alert_mode, users
     message_text = update.message.text
 
     # Перевірка пароля для адміністратора
@@ -174,15 +189,17 @@ async def handle_text(update: Update, context: CallbackContext) -> None:
             if action == 'update_subs':
                 await update.message.reply_text("Пароль правильний! Надішліть .docx файл із таблицею.")
             elif action == 'toggle_alert':
-                alert_mode = not alert_mode
-                status = "увімкнено" if alert_mode else "вимкнено"
-                message = f"⚠️ Режим тривоги {status}! Навчання буде проводитися дистанційно." if alert_mode else "✅ Тривогу скасовано. Навчання повертається до звичайного режиму."
+                context.bot_data['alert_mode'] = not context.bot_data['alert_mode']
+                status = "увімкнено" if context.bot_data['alert_mode'] else "вимкнено"
+                message = f"⚠️ Режим тривоги {status}! Навчання буде проводитися дистанційно." if context.bot_data['alert_mode'] else "✅ Тривогу скасовано. Навчання повертається до звичайного режиму."
                 await notify_users(context, message)
                 await update.message.reply_text(f"Режим тривоги {status}.")
             elif action == 'reset':
-                substitutions_df = pd.DataFrame(INITIAL_DATA["substitutions"])
-                alert_mode = INITIAL_DATA["alert_mode"]
-                users = INITIAL_DATA["users"]
+                context.bot_data['substitutions_df'] = pd.DataFrame(INITIAL_DATA["substitutions"])
+                context.bot_data['alert_mode'] = INITIAL_DATA["alert_mode"]
+                context.bot_data['users'] = INITIAL_DATA["users"].copy()
+                logger.info("Дані скинуто до початкових")
+                logger.info(f"Таблиця після скидання:\n{context.bot_data['substitutions_df'].to_string()}")
                 await update.message.reply_text("Дані скинуто до початкових!")
         else:
             await update.message.reply_text("Неправильний пароль! Спробуйте ще раз:")
@@ -191,10 +208,10 @@ async def handle_text(update: Update, context: CallbackContext) -> None:
     # Обробка звичайного запиту
     if "які заміни" in message_text.lower():
         logger.info(f"Запит через текст: {message_text}")
-        logger.info(f"Поточна таблиця замін:\n{substitutions_df.to_string()}")
-        for class_name in substitutions_df["Клас"].unique():
+        logger.info(f"Поточна таблиця замін перед відповіддю:\n{context.bot_data['substitutions_df'].to_string()}")
+        for class_name in context.bot_data['substitutions_df']["Клас"].unique():
             if class_name.lower() in message_text.lower():
-                class_subs = substitutions_df[substitutions_df["Клас"] == class_name]
+                class_subs = context.bot_data['substitutions_df'][context.bot_data['substitutions_df']["Клас"] == class_name]
                 if class_subs.empty:
                     await update.message.reply_text(f"Для класу {class_name} немає замін.")
                     return
@@ -203,19 +220,18 @@ async def handle_text(update: Update, context: CallbackContext) -> None:
                     value = class_subs[col].iloc[0]
                     if value and value != "" and value != "-":
                         response += f"{col}: {value}\n"
-                if alert_mode:
+                if context.bot_data['alert_mode']:
                     response += "\n⚠️ Увага: у зв’язку з тривогою навчання проводиться дистанційно!"
                 await update.message.reply_text(response)
                 return
-        await update.message.reply_text("Будь ласка, вкажіть клас (наприклад, 'Які заміни в 6-А?').")
+        await update.message.reply_text("Будь ласка, вкажіть клас (наприклад, 'Які заміни в 5?').")
     else:
-        await update.message.reply_text("Я розумію запити типу 'Які заміни в 6-А?'. Спробуйте ще раз!")
+        await update.message.reply_text("Я розумію запити типу 'Які заміни в 5?'. Спробуйте ще раз!")
 
 # Обробка .docx файлів
 async def handle_docx(update: Update, context: CallbackContext) -> None:
-    global substitutions_df
     if not context.user_data.get('is_admin'):
-        await update.message.reply_text("Спочочатку увійдіть у режим адміністратора, натиснувши 'Оновити таблицю (Адмін)' і ввівши пароль.")
+        await update.message.reply_text("Спочатку увійдіть у режим адміністратора, натиснувши 'Оновити таблицю (Адмін)' і ввівши пароль.")
         return
 
     if update.message.document and update.message.document.file_name.endswith('.docx'):
@@ -228,8 +244,9 @@ async def handle_docx(update: Update, context: CallbackContext) -> None:
             if not all(col in new_df.columns for col in required_columns):
                 await update.message.reply_text("Формат таблиці не відповідає встановленому. Очікувані стовпці: " + ", ".join(required_columns))
                 return
-            substitutions_df = new_df
-            logger.info(f"Оновлена таблиця замін:\n{substitutions_df.to_string()}")
+            logger.info("Оновлюємо глобальну змінну substitutions_df у context.bot_data")
+            context.bot_data['substitutions_df'] = new_df.copy()  # Використовуємо копію
+            logger.info(f"Оновлена таблиця замін після оновлення:\n{context.bot_data['substitutions_df'].to_string()}")
             context.user_data.pop('is_admin')
             await update.message.reply_text("Таблицю успішно оновлено з .docx файлу!")
         except Exception as e:
@@ -270,7 +287,7 @@ async def main():
     web_app['telegram_app'] = app
     web_app.router.add_post('/webhook', webhook)
 
-    # Отримуємо URL сервісу з Render (або використовуємо ngrok для тестування локально)
+    # Отримуємо URL сервісу з Render
     webhook_url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME', 'your-service.onrender.com')}/webhook"
     logger.info(f"Webhook URL: {webhook_url}")
 

@@ -138,7 +138,9 @@ async def handle_class_selection(update: Update, context: CallbackContext) -> No
         await query.message.reply_text(f"Для класу {class_name} немає замін.")
         return
 
-    response = f"Заміни для {class_name} на {class_subs['Дата'].iloc[0]}:\n"
+    date = class_subs['Дата'].iloc[0]
+    logger.info(f"Використана дата для класу {class_name}: {date}")
+    response = f"Заміни для {class_name} на {date}:\n"
     for col in [f"Урок {i}" for i in range(0, 8)]:
         value = class_subs[col].iloc[0]
         if value and value != "" and value != "-":
@@ -170,7 +172,9 @@ async def handle_text(update: Update, context: CallbackContext) -> None:
                 if class_subs.empty:
                     await update.message.reply_text(f"Для класу {class_name} немає замін.")
                     return
-                response = f"Заміни для {class_name} на {class_subs['Дата'].iloc[0]}:\n"
+                date = class_subs['Дата'].iloc[0]
+                logger.info(f"Використана дата для класу {class_name}: {date}")
+                response = f"Заміни для {class_name} на {date}:\n"
                 for col in [f"Урок {i}" for i in range(0, 8)]:
                     value = class_subs[col].iloc[0]
                     if value and value != "" and value != "-":
@@ -193,7 +197,7 @@ async def handle_docx(update: Update, context: CallbackContext) -> None:
             file_path = await file.download_to_drive()
             logger.info(f"Завантажено файл: {file_path}")
             new_df = extract_table_from_docx(file_path)
-            context.bot_data['substitutions_df'] = new_df.copy()
+            context.bot_data['substitutions_df'] = new_df.copy()  # Повне оновлення таблиці
             logger.info(f"Оновлена таблиця замін:\n{context.bot_data['substitutions_df'].to_string()}")
             context.user_data.pop('is_admin')
             await update.message.reply_text("Таблицю успішно оновлено з .docx файлу!")

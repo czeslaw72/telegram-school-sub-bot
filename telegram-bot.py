@@ -164,8 +164,8 @@ async def handle_docx(update: Update, context: CallbackContext) -> None:
             context.user_data.pop('is_admin', None)
 
             loaded_classes = ', '.join(sorted(new_df['Клас'].unique()))
-            await update.message.reply_text(f"Таблицю успішно оновлено з .docx файлу!
-Класи: {loaded_classes}")
+            await update.message.reply_text(f"""Таблицю успішно оновлено з .docx файлу!
+Класи: {loaded_classes}""")
         except Exception as e:
             logger.error(f"Помилка при обробці .docx файлу: {str(e)}")
             context.user_data.pop('is_admin', None)

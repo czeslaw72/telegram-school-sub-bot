@@ -118,7 +118,7 @@ async def handle_class_selection(update: Update, context: CallbackContext) -> No
         return
 
     date = class_subs['Дата'].iloc[0]
-    response = f"Заміни для {class_name} на {date}:
+    response = f"Заміни для {class_name} на {date}:\n"
 "
     for col in [f"Урок {i}" for i in range(8)]:
         value = class_subs[col].iloc[0]

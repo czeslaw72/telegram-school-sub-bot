@@ -118,13 +118,11 @@ async def handle_class_selection(update: Update, context: CallbackContext) -> No
         return
 
     date = class_subs['Дата'].iloc[0]
-    response = f"Заміни для {class_name} на {date}:\n"
-"
+       response = f"Заміни для {class_name} на {date}:\n"
     for col in [f"Урок {i}" for i in range(8)]:
         value = class_subs[col].iloc[0]
         if value:
-            response += f"{col}: {value}
-"
+            response += f"{col}: {value}\n"
     await query.message.reply_text(response)
 
 async def handle_text(update: Update, context: CallbackContext) -> None:
